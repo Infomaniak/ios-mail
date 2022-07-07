@@ -116,6 +116,9 @@ struct SplitView: View {
             await fetchSignatures()
         }
         .task {
+            await fetchMailPreferences()
+        }
+        .task {
             await fetchFolders()
             // On first launch, select inbox
             if selectedFolder == nil {
@@ -164,9 +167,9 @@ struct SplitView: View {
         .environmentObject(bottomSheet)
         .bottomSheet(bottomSheetPosition: $bottomSheet.position, options: bottomSheetOptions) {
             switch bottomSheet.state {
-            case .move(let moveHandler):
+            case let .move(moveHandler):
                 MoveEmailView(mailboxManager: mailboxManager, state: bottomSheet, moveHandler: moveHandler)
-            case .createNewFolder(let mode):
+            case let .createNewFolder(mode):
                 CreateFolderView(mailboxManager: mailboxManager, state: bottomSheet, mode: mode)
             case .getMoreStorage:
                 MoreStorageView(state: bottomSheet)
@@ -192,6 +195,20 @@ struct SplitView: View {
         await tryOrDisplayError {
             try await mailboxManager.signatures()
         }
+    }
+
+    private func fetchMailPreferences() async {
+        await tryOrDisplayError {
+            let mailUser = try await mailboxManager.apiFetcher.mailPreferences()
+            updateUserDefaults(mailUser)
+        }
+    }
+
+    private func updateUserDefaults(_ mailUser: MailUser) {
+        UserDefaults.shared.cancelSendDelay = CancelDelay(rawValue: mailUser.preferences.cancelSendDelay) ?? .seconds10
+        UserDefaults.shared.forwardMode = ForwardMode(rawValue: mailUser.preferences.forwardMode) ?? .inline
+        UserDefaults.shared.includeOriginalInReply = Bool(truncating: mailUser.preferences.includeMessInReply as NSNumber)
+        UserDefaults.shared.acknowledgement = Bool(truncating: mailUser.preferences.deliveryAcknowledgement as NSNumber)
     }
 
     private func fetchFolders() async {

@@ -57,9 +57,13 @@ public extension Endpoint {
         return .base.appending(path: "/mail/\(uuid)")
     }
 
+    static var mailPreferences: Endpoint {
+        return .base.appending(path: "/user")
+    }
+
     static func permissions(mailbox: Mailbox) -> Endpoint {
         return .base.appending(path: "/mailbox/permissions",
-                               queryItems: [URLQueryItem(name: "user_mailbox_id", value: "\((mailbox.linkId))"),
+                               queryItems: [URLQueryItem(name: "user_mailbox_id", value: "\(mailbox.linkId)"),
                                             URLQueryItem(name: "product_id", value: "\(mailbox.hostingId)")])
     }
 
