@@ -82,7 +82,10 @@ public class MailboxManager: ObservableObject {
                 Draft.self,
                 SignatureResponse.self,
                 Signature.self,
-                ValidEmail.self
+                ValidEmail.self,
+                MailboxSettings.self,
+                MailboxHosting.self,
+                RecipientLimitation.self
             ]
         )
     }
@@ -326,7 +329,8 @@ public class MailboxManager: ObservableObject {
             let folderName = FolderRole.trash.localizedName
             Task.detached {
                 await IKSnackBar.showCancelableSnackBar(message: MailResourcesStrings.Localizable.snackbarThreadMoved(folderName),
-                                                        cancelSuccessMessage: MailResourcesStrings.Localizable.snackbarMoveCancelled,
+                                                        cancelSuccessMessage: MailResourcesStrings.Localizable
+                                                            .snackbarMoveCancelled,
                                                         cancelableResponse: response,
                                                         mailboxManager: self)
             }
@@ -704,6 +708,41 @@ public class MailboxManager: ObservableObject {
                 realm.delete(liveThread)
             }
         }
+    }
+
+    // MARK: - Settings
+
+    private func initSettings(using realm: Realm) -> MailboxSettings {
+        let settings = MailboxSettings()
+        try? realm.safeWrite {
+            realm.add(settings)
+        }
+        return settings
+    }
+
+    public func getSettings(using realm: Realm? = nil) -> MailboxSettings {
+        let realm = getRealm()
+        if let settings = realm.objects(MailboxSettings.self).first {
+            return settings
+        }
+        return initSettings(using: realm)
+    }
+
+    public func updateSettings(closure: () -> Void) {
+        let realm = getRealm()
+        try? realm.safeWrite {
+            closure()
+        }
+    }
+
+    public func mailboxHosting() async throws -> MailboxHosting {
+        let mailboxHosting = try await apiFetcher.mailboxHosting(mailbox: mailbox)
+        let settings = getSettings()
+        let realm = getRealm()
+        try? realm.safeWrite {
+            settings.mailboxHosting = mailboxHosting
+        }
+        return mailboxHosting.freezeIfNeeded()
     }
 
     // MARK: - Utilities

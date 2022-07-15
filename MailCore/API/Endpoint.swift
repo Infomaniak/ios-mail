@@ -153,7 +153,13 @@ public extension Endpoint {
         return .resource(messageResource).appending(path: "/report")
     }
 
-    static func createAttachment(uuid: String) -> Endpoint {
+    static func mailboxHosting(hostingId: Int, mailboxName: String) -> Endpoint {
+        return .baseManager.appending(path: "/\(hostingId)/mailboxes/\(mailboxName)", queryItems: [
+            URLQueryItem(name: "with", value: "authorized_senders,blocked_senders")
+        ])
+    }
+
+	static func createAttachment(uuid: String) -> Endpoint {
         return .draft(uuid: uuid).appending(path: "/attachment")
     }
 }

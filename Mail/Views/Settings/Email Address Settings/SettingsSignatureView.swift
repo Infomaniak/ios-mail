@@ -18,20 +18,19 @@
 
 import SwiftUI
 
-struct SettingsSubMenuCell: View {
-    let title: String
-    let destination: SettingsDestination
+struct SettingsSignatureView: View {
+    @State var signatureValue = ""
 
     var body: some View {
-        NavigationLink(destination: destination.getDestination()) {
-            Text(title)
-                .textStyle(.body)
-        }
+        ZStack {}
+        TextEditor(text: $signatureValue)
+
+            .navigationBarTitle("Modifier la signature", displayMode: .inline)
     }
 }
 
-struct SettingsSubMenuCell_Previews: PreviewProvider {
+struct SettingsSignatureView_Previews: PreviewProvider {
     static var previews: some View {
-        SettingsSubMenuCell(title: "Settings sub-menu", destination: .send)
+        SettingsSignatureView()
     }
 }

@@ -232,6 +232,29 @@ public class MailApiFetcher: ApiFetcher {
         try await perform(request: authenticatedRequest(.folders(uuid: mailbox.uuid), method: .post, parameters: folder)).data
     }
 
+    // MARK: - Settings
+
+    public func mailboxHosting(mailbox: Mailbox) async throws -> MailboxHosting {
+        try await perform(request: authenticatedRequest(.mailboxHosting(hostingId: mailbox.hostingId,
+                                                                        mailboxName: mailbox.mailbox))).data
+    }
+
+    public func updateRecipientLimitation(mailbox: Mailbox, allowed: [String], blocked: [String]) async throws -> Bool {
+        try await perform(request: authenticatedRequest(.mailboxHosting(
+            hostingId: mailbox.hostingId,
+            mailboxName: mailbox.mailbox
+        ), method: .patch, parameters: ["authorized_senders": allowed, "blocked_senders": blocked])).data
+    }
+
+    public func updateFilters(ads: Bool, spam: Bool, mailbox: Mailbox) async throws -> Bool {
+        try await perform(request: authenticatedRequest(
+            .mailboxHosting(hostingId: mailbox.hostingId, mailboxName: mailbox.mailbox),
+            method: .patch,
+            parameters: ["has_move_spam": spam, "has_mail_filtering": ads]
+        ))
+        .data
+	}
+
     public func createAttachment(
         mailbox: Mailbox,
         attachmentData: Data,
