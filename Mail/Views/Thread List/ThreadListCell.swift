@@ -31,6 +31,63 @@ extension ThreadDensity {
 }
 
 struct ThreadListCell: View {
+    @ObservedObject var viewModel: ThreadListViewModel
+    @ObservedObject var multipleSelectionViewModel: ThreadListMultipleSelectionViewModel
+
+    @State private var isLinkEnabled = false
+
+    var thread: Thread
+    var navigationController: UINavigationController?
+
+    private var isInDraftFolder: Bool {
+        return viewModel.folder?.role == .draft
+    }
+
+    private var isSelected: Bool {
+        return multipleSelectionViewModel.editMode == .active &&
+        multipleSelectionViewModel.selectedItems.contains(thread)
+    }
+
+    var body: some View {
+        ZStack {
+            if !isInDraftFolder {
+                NavigationLink(destination: ThreadView(mailboxManager: viewModel.mailboxManager,
+                                                       thread: thread,
+                                                       navigationController: navigationController),
+                               isActive: $isLinkEnabled) {
+                    EmptyView()
+                }
+                .opacity(0)
+            }
+
+            ThreadListCellContent(mailboxManager: viewModel.mailboxManager, thread: thread)
+        }
+        .tag(thread)
+        .onTapGesture {
+            if multipleSelectionViewModel.editMode == .inactive {
+                viewModel.selectedThread = thread
+                if isInDraftFolder {
+                    viewModel.editDraft(from: thread)
+                } else {
+                    isLinkEnabled = true
+                }
+            } else {
+                multipleSelectionViewModel.toggleSelect(thread: thread)
+            }
+        }
+        .onLongPressGesture {
+            withAnimation {
+                multipleSelectionViewModel.editMode = .active
+            }
+        }
+        .modifyIf(isSelected) { view in
+            view
+                .background(SelectionBackground())
+        }
+    }
+}
+
+private struct ThreadListCellContent: View {
     @AppStorage(UserDefaults.shared.key(.threadDensity)) var density: ThreadDensity = .normal
 
     var mailboxManager: MailboxManager
@@ -123,10 +180,13 @@ struct ThreadListCell: View {
 
 struct ThreadListCell_Previews: PreviewProvider {
     static var previews: some View {
-        ThreadListCell(
-            mailboxManager: PreviewHelper.sampleMailboxManager,
-            thread: PreviewHelper.sampleThread
-        )
+        let viewModel = ThreadListViewModel(mailboxManager: PreviewHelper.sampleMailboxManager,
+                                            folder: nil,
+                                            bottomSheet: ThreadBottomSheet())
+
+        ThreadListCell(viewModel: viewModel,
+                       multipleSelectionViewModel: ThreadListMultipleSelectionViewModel(),
+                       thread: PreviewHelper.sampleThread)
         .previewLayout(.sizeThatFits)
         .previewDevice("iPhone 13 Pro")
     }

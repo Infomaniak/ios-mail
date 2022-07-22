@@ -48,6 +48,7 @@ class ThreadBottomSheet: BottomSheetState<ThreadBottomSheet.State, ThreadBottomS
 
 struct ThreadListView: View {
     @StateObject var viewModel: ThreadListViewModel
+    @StateObject var multipleSelectionViewModel: ThreadListMultipleSelectionViewModel
 
     @EnvironmentObject var menuSheet: MenuSheet
     @EnvironmentObject var globalBottomSheet: GlobalBottomSheet
@@ -57,7 +58,6 @@ struct ThreadListView: View {
     @Binding var currentFolder: Folder?
 
     @State private var avatarImage = Image(resource: MailResourcesAsset.placeholderAvatar)
-    @State private var selectedThread: Thread?
     @StateObject var bottomSheet: ThreadBottomSheet
     @StateObject private var networkMonitor = NetworkMonitor()
     @State private var navigationController: UINavigationController?
@@ -72,6 +72,7 @@ struct ThreadListView: View {
         _viewModel = StateObject(wrappedValue: ThreadListViewModel(mailboxManager: mailboxManager,
                                                                    folder: folder.wrappedValue,
                                                                    bottomSheet: threadBottomSheet))
+        _multipleSelectionViewModel = StateObject(wrappedValue: ThreadListMultipleSelectionViewModel())
         _currentFolder = folder
         self.isCompact = isCompact
 
@@ -96,7 +97,7 @@ struct ThreadListView: View {
                     EmptyListView()
                 }
 
-                List {
+                List(selection: $multipleSelectionViewModel.selectedItems) {
                     ForEach(viewModel.sections) { section in
                         Section {
                             threadList(threads: section.threads)
@@ -119,6 +120,7 @@ struct ThreadListView: View {
                     }
                 }
                 .listStyle(.plain)
+                .environment(\.editMode, $multipleSelectionViewModel.editMode)
                 .introspectTableView { tableView in
                     tableView.contentInset = UIEdgeInsets(top: 0, left: 0, bottom: 100, right: 0)
                 }
@@ -130,7 +132,10 @@ struct ThreadListView: View {
         .introspectNavigationController { navigationController in
             self.navigationController = navigationController
         }
-        .modifier(ThreadListNavigationBar(isCompact: isCompact, folder: $viewModel.folder, avatarImage: $avatarImage))
+        .modifier(ThreadListToolbar(isCompact: isCompact,
+                                    multipleSelectionViewModel: multipleSelectionViewModel,
+                                    folder: $viewModel.folder,
+                                    avatarImage: $avatarImage))
         .floatingActionButton(icon: Image(resource: MailResourcesAsset.edit), title: MailResourcesStrings.Localizable.buttonNewMessage) {
             menuSheet.state = .newMessage
         }
@@ -152,16 +157,10 @@ struct ThreadListView: View {
             }
         }
         .onAppear {
-            if isCompact {
-                selectedThread = nil
-            }
             networkMonitor.start()
             viewModel.globalBottomSheet = globalBottomSheet
-        }
-        .onChange(of: currentFolder) { newFolder in
-            guard let folder = newFolder else { return }
-            selectedThread = nil
-            viewModel.updateThreads(with: folder)
+            viewModel.menuSheet = menuSheet
+            viewModel.selectedThread = nil
         }
         .task {
             if let account = AccountManager.instance.currentAccount {
@@ -171,6 +170,10 @@ struct ThreadListView: View {
                 viewModel.updateThreads(with: folder)
             }
         }
+        .onChange(of: currentFolder) { newFolder in
+            guard let folder = newFolder else { return }
+            viewModel.updateThreads(with: folder)
+        }
         .refreshable {
             await viewModel.fetchThreads()
         }
@@ -178,61 +181,27 @@ struct ThreadListView: View {
 
     func threadList(threads: [Thread]) -> some View {
         ForEach(threads) { thread in
-            Group {
-                if currentFolder?.role == .draft {
-                    Button(action: {
-                        editDraft(from: thread)
-                    }, label: {
-                        ThreadListCell(mailboxManager: viewModel.mailboxManager, thread: thread)
-                    })
-                } else {
-                    ZStack {
-                        NavigationLink(destination: {
-                            ThreadView(mailboxManager: viewModel.mailboxManager,
-                                       thread: thread,
-                                       navigationController: navigationController)
-                                .onAppear { selectedThread = thread }
-                        }, label: { EmptyView() })
-                        .opacity(0)
-
-                        ThreadListCell(mailboxManager: viewModel.mailboxManager, thread: thread)
-                    }
-                }
-            }
-            .listRowInsets(.init(top: 0, leading: 8, bottom: 0, trailing: 12))
-            .listRowSeparator(.hidden)
-            .listRowBackground(selectedThread == thread
-                ? MailResourcesAsset.backgroundCardSelectedColor.swiftUiColor
-                : MailResourcesAsset.backgroundColor.swiftUiColor)
-            .modifier(ThreadListSwipeAction(thread: thread, viewModel: viewModel))
+            ThreadListCell(viewModel: viewModel,
+                           multipleSelectionViewModel: multipleSelectionViewModel,
+                           thread: thread,
+                           navigationController: navigationController)
             .onAppear {
                 viewModel.loadNextPageIfNeeded(currentItem: thread)
             }
-        }
-    }
-
-    private func editDraft(from thread: Thread) {
-        guard let message = thread.messages.first else { return }
-        var sheetPresented = false
-
-        // If we already have the draft locally, present it directly
-        if let draft = viewModel.mailboxManager.draft(messageUid: message.uid)?.detached() {
-            menuSheet.state = .editMessage(draft: draft)
-            sheetPresented = true
-        }
-
-        // Update the draft
-        Task { [sheetPresented] in
-            let draft = try await viewModel.mailboxManager.draft(from: message)
-            if !sheetPresented {
-                menuSheet.state = .editMessage(draft: draft)
-            }
+            .listRowInsets(.init(top: 0, leading: 8, bottom: 0, trailing: 12))
+            .listRowSeparator(.hidden)
+            .listRowBackground(viewModel.selectedThread == thread
+                ? MailResourcesAsset.backgroundCardSelectedColor.swiftUiColor
+                : MailResourcesAsset.backgroundColor.swiftUiColor)
+            .modifier(ThreadListSwipeAction(thread: thread, viewModel: viewModel))
         }
     }
 }
 
-private struct ThreadListNavigationBar: ViewModifier {
+private struct ThreadListToolbar: ViewModifier {
     var isCompact: Bool
+
+    @ObservedObject var multipleSelectionViewModel: ThreadListMultipleSelectionViewModel
 
     @Binding var folder: Folder?
     @Binding var avatarImage: Image
@@ -240,46 +209,73 @@ private struct ThreadListNavigationBar: ViewModifier {
     @EnvironmentObject var menuSheet: MenuSheet
     @EnvironmentObject var navigationDrawerController: NavigationDrawerController
 
+    @ToolbarContentBuilder
+    private var navigationBar: some ToolbarContent {
+        ToolbarItemGroup(placement: .navigationBarTrailing) {
+            Button {
+                // TODO: Search
+                showWorkInProgressSnackBar()
+            } label: {
+                Image(resource: MailResourcesAsset.search)
+            }
+
+            Button {
+                menuSheet.state = .switchAccount
+            } label: {
+                avatarImage
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 30, height: 30)
+                    .clipShape(Circle())
+            }
+        }
+
+        ToolbarItem(placement: .principal) {
+            Text(folder?.localizedName ?? "")
+                .layoutPriority(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textStyle(.header1)
+                .padding(.leading, 8)
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var navigationBarCompact: some ToolbarContent {
+        ToolbarItem(placement: .navigationBarLeading) {
+            Button {
+                navigationDrawerController.open()
+            } label: {
+                Image(resource: MailResourcesAsset.burger)
+            }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var multipleSelectionNavigationBar: some ToolbarContent {
+        ToolbarItem(placement: .navigationBarLeading) {
+            Button(MailResourcesStrings.Localizable.buttonSelectAll) {}
+        }
+        ToolbarItem(placement: .navigationBarTrailing) {
+            Button(MailResourcesStrings.Localizable.buttonCancel) {
+                multipleSelectionViewModel.editMode = .inactive
+            }
+        }
+    }
+
     func body(content: Content) -> some View {
         content
-            .navigationBarTitle(folder?.localizedName ?? "", displayMode: .inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Text(folder?.localizedName ?? "")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textStyle(.header1)
-                        .padding(.leading, 8)
-                }
-
-                ToolbarItemGroup(placement: .navigationBarTrailing) {
-                    Button {
-                        // TODO: Search
-                        showWorkInProgressSnackBar()
-                    } label: {
-                        Image(resource: MailResourcesAsset.search)
+            .navigationBarTitleDisplayMode(.inline)
+            .modifyIf(multipleSelectionViewModel.editMode == .inactive) { view in
+                view
+                    .toolbar { navigationBar }
+                    .modifyIf(isCompact) { view in
+                        view.toolbar { navigationBarCompact }
                     }
-
-                    Button {
-                        menuSheet.state = .switchAccount
-                    } label: {
-                        avatarImage
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 30, height: 30)
-                            .clipShape(Circle())
-                    }
-                }
             }
-            .modifyIf(isCompact) { view in
-                view.toolbar {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Button {
-                            navigationDrawerController.open()
-                        } label: {
-                            Image(resource: MailResourcesAsset.burger)
-                        }
-                    }
-                }
+            .modifyIf(multipleSelectionViewModel.editMode == .active) { view in
+                view
+                    .navigationTitle("0 sélectionné")
+                    .toolbar { multipleSelectionNavigationBar }
             }
     }
 }
